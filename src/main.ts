@@ -83,6 +83,10 @@ async function run_server() {
     }
   });
 
+  app.get("/", (req, res) => {
+    res.status(200).send("Hello from Convo Square Server");
+    return
+  });
   app.get("/auth/login", (req, res) => {
     const postData = req.query; // Parse the JSON data
     const data = {
@@ -1232,7 +1236,7 @@ async function run_server() {
               if (
                 conversation?.isSession &&
                 (conversation.session as SessionDocument).status ===
-                  SessionStatusEnum.closed
+                SessionStatusEnum.closed
               ) {
                 res
                   .status(400)
