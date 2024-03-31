@@ -26,7 +26,7 @@ import { Invite } from "./database/models/invite.model";
 import { InviteStatusEnum, SessionStatusEnum } from "./utils/enums.utils";
 import { Session, SessionDocument } from "./database/models/session.model";
 import { FirebaseService } from "./services/firebase.service";
-
+import cors from "cors"
 dotenv.config();
 
 async function run_server() {
@@ -62,6 +62,7 @@ async function run_server() {
   });
 
   console.log("Setting up apis...");
+  app.use(cors())
 
   app.post("/auth/register", async (req, res) => {
     const postData = req.body; // Parse the JSON data
