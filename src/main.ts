@@ -11,13 +11,21 @@ import {
 import mongoose from "mongoose";
 import { User, UserDocument } from "./database/models/user.model";
 import { MailService } from "./services/mail.service";
-import { hasEmptyValues } from "./utils/functions.utils";
-import { Conversation } from "./database/models/conversation.model";
-import { ParticipantDocument } from "./database/models/participant.schema";
+import {
+  extractOtherParticipants,
+  hasEmptyValues,
+} from "./utils/functions.utils";
+import {
+  Conversation,
+  ConversationDocument,
+} from "./database/models/conversation.model";
+import { ParticipantDocument } from "./database/models/participant.model";
 import { Server } from "socket.io";
 import { MessageDocument } from "./database/models/message.model";
-import { Invite } from "./database/models/invite.schema";
-import { InviteStatusEnum } from "./utils/enums.utils";
+import { Invite } from "./database/models/invite.model";
+import { InviteStatusEnum, SessionStatusEnum } from "./utils/enums.utils";
+import { Session, SessionDocument } from "./database/models/session.model";
+import { FirebaseService } from "./services/firebase.service";
 
 dotenv.config();
 
@@ -199,18 +207,52 @@ async function run_server() {
   });
 
   app.get("/users/get/username", (req: Request, res: Response) => {
-    User.findOne({ username: req.query.username })
-      // .populate(["contacts", "blockList"])
-      .then((user) => {
-        console.log({ user });
-        if (user) {
-          res.status(200).send(user);
+    const data: {
+      searcherId: string;
+      username: string;
+    } = {
+      searcherId: req.query.searcherId as string,
+      username: req.query.username as string,
+    };
+    if (hasEmptyValues(data)) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
+
+    User.findOne({ _id: data.searcherId })
+      .populate(["blockList"])
+      .then((searcher) => {
+        if (searcher) {
+          if (
+            searcher.blockList?.find(
+              (blockedUser) =>
+                (blockedUser as UserDocument).username === data.username,
+            )
+          ) {
+            res.status(400).send("User is blocked by you");
+            return;
+          } else {
+            User.findOne({ username: req.query.username })
+              // .populate(["contacts", "blockList"])
+              .then((user) => {
+                console.log({ user });
+                if (user) {
+                  res.status(200).send(user);
+                  return;
+                } else {
+                  res.status(400).send("User not found");
+                  return;
+                }
+              })
+              .catch((error) => {
+                res.status(500).send("Internal server error");
+                return;
+              });
+          }
         } else {
           res.status(400).send("User not found");
+          return;
         }
-      })
-      .catch((error) => {
-        res.status(400).send("User not found");
       });
   });
 
@@ -243,9 +285,31 @@ async function run_server() {
                     { _id: data.currentId },
                     { $push: { contacts: userToAdd._id } },
                   ).then((result) => {
-                    result.modifiedCount === 1
-                      ? res.status(200).send("Contact added succesfully")
-                      : res.status(400).send("Failed to add contact");
+                    if (result.modifiedCount === 1) {
+                      const members: Array<ParticipantDocument> = [
+                        { user: data.currentId },
+                        { user: data.id },
+                      ];
+                      const conversation = new Conversation({
+                        participants: [...members],
+                      });
+                      conversation
+                        .save()
+                        .then((result) => {
+                          res
+                            .status(200)
+                            .send("Conversation created succesfully");
+                          return;
+                        })
+                        .catch((error) => {
+                          console.log(error);
+                          res.status(500).send("Internal server error");
+                          return;
+                        });
+                    } else {
+                      res.status(400).send("Failed to add contact");
+                      return;
+                    }
                     return;
                   });
                 }
@@ -288,7 +352,7 @@ async function run_server() {
               if (userToAdd) {
                 User.updateOne(
                   { _id: data.currentId },
-                  { $pop: { contacts: userToAdd._id } },
+                  { $pull: { contacts: userToAdd._id } },
                 ).then((result) => {
                   result.modifiedCount === 1
                     ? res.status(200).send("Contact removed succesfully")
@@ -442,11 +506,111 @@ async function run_server() {
   });
 
   app.patch("/users/update", (req: Request, res: Response) => {
-    User.updateOne({ _id: req.body.userId }, { ...req.body }).then((result) => {
-      if (result.matchedCount === 1 && result.modifiedCount === 1) {
-        res.status(200).send("User updated succesfully");
-      } else if (result.matchedCount === 0) {
+    try {
+      User.findOneAndUpdate(
+        { _id: req.body.userId },
+        { ...req.body },
+        { new: true },
+      ).then((result) => {
+        if (result) {
+          res.status(200).send("User updated succesfully");
+        } else {
+          res.status(400).send("User not found");
+          return;
+        }
+      });
+    } catch (error) {
+      res.status(500).send("Internal server error");
+      return;
+    }
+  });
+
+  app.patch("/users/fcm", (req: Request, res: Response) => {
+    const data: { userId: string; fcmToken: string } = {
+      userId: req.body.userId,
+      fcmToken: req.body.fcmToken,
+    };
+    if (hasEmptyValues(data)) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
+    User.findOne({ _id: data.userId }).then((user) => {
+      if (user) {
+        user.firebaseToken = data.fcmToken;
+        user.save().then((result) => {
+          if (result) {
+            res.status(200).send("Firebase token updated succesfully");
+            return;
+          } else {
+            res.status(400).send("Failed to update firebase token");
+            return;
+          }
+        });
+      } else {
         res.status(400).send("User not found");
+        return;
+      }
+    });
+  });
+
+  app.patch("/users/toggle-notifications", (req: Request, res: Response) => {
+    const data: { userId: string; notifications: boolean } = {
+      userId: req.body.userId,
+      notifications: req.body.notifications,
+    };
+    if (hasEmptyValues(data)) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
+    User.findOne({ _id: data.userId }).then((user) => {
+      if (user) {
+        user.settings = {
+          theme: user.settings?.theme as "dark" | "light",
+          notifications: data.notifications,
+        };
+        user.save().then((result) => {
+          if (result) {
+            res.status(200).send("Notifications toggled succesfully");
+            return;
+          } else {
+            res.status(400).send("Failed to toggle notifications");
+            return;
+          }
+        });
+      } else {
+        res.status(400).send("User not found");
+        return;
+      }
+    });
+  });
+
+  app.patch("/users/toggle-theme", (req: Request, res: Response) => {
+    const data: { userId: string; theme: string } = {
+      userId: req.body.userId,
+      theme: req.body.theme,
+    };
+    if (hasEmptyValues(data)) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
+    User.findOne({ _id: data.userId }).then((user) => {
+      if (user) {
+        user.settings = {
+          theme: data.theme as "dark" | "light",
+          notifications: user.settings?.notifications as boolean,
+        };
+        user.save().then((result) => {
+          if (result) {
+            res.status(200).send("Theme toggled succesfully");
+            return;
+          } else {
+            res.status(400).send("Failed to toggle theme");
+            return;
+          }
+        });
+      } else {
+        res.status(400).send("User not found");
+        return;
       }
     });
   });
@@ -679,6 +843,241 @@ async function run_server() {
 
   // //////////////////// INVITES MODULE END ////////////////////
 
+  // //////////////////// SESSIONS MODULE START ////////////////////
+
+  app.post("/sessions/create", async (req, res) => {
+    // required for one-to-one conversation: participants
+    // required for group conversation: participants, name, group
+    const postData = req.body; // Parse the JSON data
+    try {
+      const data: {
+        adminId: string;
+        memberIds: string[];
+        parentConversationId: string;
+        duration: number;
+      } = {
+        adminId: postData.adminId,
+        parentConversationId: postData.parentConversationId,
+        memberIds: postData.memberIds,
+        duration: postData.duration,
+      };
+      if (hasEmptyValues(data)) {
+        res.status(400).send("Missing required fields");
+        return;
+      }
+
+      const foundParentConversation = await Conversation.findOne({
+        _id: data.parentConversationId,
+      });
+      if (foundParentConversation) {
+        const ongoingSession: SessionDocument | null = await Session.findOne({
+          parentConversation: data.parentConversationId,
+        });
+        if (ongoingSession === null) {
+          let newSession = new Session({
+            status: SessionStatusEnum.ongoing,
+            duration: data.duration,
+            parentConversation: data.parentConversationId,
+          });
+          // console.log({ session: newSession })
+          const members: Array<ParticipantDocument> = data.memberIds.map(
+            (memberId): ParticipantDocument => {
+              return { user: memberId };
+            },
+          );
+          const conversation = new Conversation({
+            participants: [...members, { user: data.adminId, role: "admin" }],
+            name: foundParentConversation.name,
+            session: newSession._id,
+            isGroup: true,
+            isSession: true,
+          });
+          conversation
+            .save()
+            .then(async (newSavedConversation) => {
+              const result = await Conversation.findOneAndUpdate(
+                { _id: data.parentConversationId },
+                { session: newSession._id },
+                { new: true },
+              );
+              // console.log({ result })
+              if (result) {
+                newSession.parentConversation = data.parentConversationId;
+                newSession.conversation = newSavedConversation._id;
+                newSession.save().then(async (newSavedSession) => {
+                  if (newSavedSession) {
+                    //start a timer here
+                    const populatedSession = await Session.findOne({
+                      _id: newSavedSession._id,
+                    }).populate([
+                      "parentConversation",
+                      "conversation",
+                      "conversation.participants.user",
+                    ]);
+                    res.status(200).send(populatedSession);
+                    setTimeout(() => {
+                      Session.updateOne(
+                        { _id: newSavedSession._id },
+                        { status: SessionStatusEnum.closed },
+                      ).then((result) => {
+                        if (result.modifiedCount === 1) {
+                          console.log("Session stopped");
+                        } else {
+                          console.log("Failed to stop session");
+                        }
+                      });
+                    }, data.duration);
+                    return;
+                  } else {
+                    Conversation.deleteOne({ _id: newSavedConversation });
+                    res.status(500).send("Failed to start session");
+                    return;
+                  }
+                });
+              } else {
+                res.status(500).send("Failed to start session");
+                return;
+              }
+            })
+            .catch((error) => {
+              console.log(error);
+              res.status(500).send("Internal server error");
+              return;
+            });
+        } else {
+          res
+            .status(400)
+            .send("An ongoing session already exists for this conversation");
+          return;
+        }
+      } else {
+        res.status(400).send("Parent conversation does not exist");
+        return;
+      }
+    } catch (error) {
+      console.log(error);
+      res.status(500).send("Internal server error");
+    }
+  });
+
+  app.get("/sessions/list", async (req: Request, res: Response) => {
+    const data: { userId: string } = {
+      userId: req.query.userId as string,
+    };
+    if (hasEmptyValues(data)) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
+
+    let response: Array<SessionDocument> = [];
+
+    let onGoingSessions = await Session.find({
+      status: SessionStatusEnum.ongoing,
+    })
+      // .populate(["parentConversation"])
+      .populate({
+        path: "parentConversation",
+        populate: {
+          path: "participants.user",
+        },
+      })
+      .populate({
+        path: "conversation",
+        populate: {
+          path: "participants.user",
+        },
+      });
+    // console.log(onGoingSessions[0].conversation)
+    // .populate({
+    //   path: 'conversation',
+    //   match: { "participants.user": data.userId } // filter based on specific fields of the second schema
+    // })
+    onGoingSessions = onGoingSessions.filter((session) =>
+      (session.conversation as ConversationDocument).participants
+        .map((p) => (p.user as UserDocument)?._id?.toString())
+        .includes(data.userId),
+    );
+    onGoingSessions = onGoingSessions.filter(
+      (session) => session.conversation !== null,
+    );
+
+    let closedSessions = await Session.find({
+      status: SessionStatusEnum.closed,
+    })
+      .populate({
+        path: "parentConversation",
+      })
+      .populate({
+        path: "conversation",
+        match: { "participants.role": "admin" }, // filter based on specific fields of the second schema
+      });
+    closedSessions = closedSessions.filter(
+      (session) => session.conversation !== null,
+    );
+
+    res.send([...onGoingSessions, ...closedSessions]);
+    return;
+  });
+
+  app.patch("/sessions/stop", async (req: Request, res: Response) => {
+    const data: { adminId: string; sessionId: string } = {
+      adminId: req.body.adminId,
+      sessionId: req.body.sessionId,
+    };
+    if (hasEmptyValues(data)) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
+    let foundSession = await Session.findOne({
+      _id: data.sessionId,
+      status: SessionStatusEnum.ongoing,
+    }).populate("conversation");
+    if (foundSession) {
+      const foundAdmin: ParticipantDocument | undefined = (
+        foundSession.conversation as ConversationDocument
+      ).participants.find(
+        (p) => p.role === "admin" && p.user.toString() === data.adminId,
+      );
+      if (foundAdmin) {
+        // Conversation.updateOne({ _id: (foundSession.conversation as ConversationDocument)._id }, { session: null }).then((result) => {
+        //   if (result.modifiedCount === 1) {
+        Conversation.updateOne(
+          {
+            _id: (foundSession.parentConversation as ConversationDocument)._id,
+          },
+          { session: null },
+        ).then((result) => {
+          if (result.modifiedCount === 1) {
+            console.log("Session removed from conversation");
+            foundSession.status = SessionStatusEnum.closed;
+            foundSession.save().then((result) => {
+              res.status(200).send("Session stopped");
+              return;
+            });
+          } else {
+            res
+              .status(400)
+              .send("Could not update session parent conversation");
+            return;
+          }
+        });
+        // } else {
+        //   res.status(400).send("Could not update session conversation");
+        //   return;
+        // }
+        // })
+      } else {
+        res.status(400).send("You are not the admin of this session");
+        return;
+      }
+    } else {
+      res.status(400).send("No such Ongoing Session found");
+      return;
+    }
+  });
+
+  // //////////////////// SESSIONS MODULE END ////////////////////
+
   // //////////////////// CONVERSATIONS MODULE START ////////////////////
   app.post("/conversations/create", async (req, res) => {
     // required for one-to-one conversation: participants
@@ -780,36 +1179,129 @@ async function run_server() {
         res.status(400).send("Missing required fields");
         return;
       }
-      Conversation.findOneAndUpdate(
-        { _id: data.conversationId },
-        {
-          $push: {
-            messages: {
-              conversation: data.conversationId,
-              sender: data.senderId,
-              text: postData.text,
-              attachment: postData.attachment,
-            },
-          },
-        },
-        {
-          new: true,
-        },
-      )
-        .then((result) => {
-          if (result) {
-            res.status(200).send(result.messages[result.messages.length - 1]);
-            return;
-          } else {
-            res.status(400).send(null);
-            return;
-          }
-        })
-        .catch((error) => {
-          console.error(error);
-          res.status(500).send("Internal server error");
+
+      User.findOne({ _id: data.senderId }).then((sender) => {
+        if (sender) {
+          Conversation.findOne({ _id: data.conversationId })
+            .populate("session")
+            .populate({
+              path: "participants.user",
+              // populate: {
+              //   path: 'blockList'
+              // }
+            })
+            .then((conversation) => {
+              // if it is a one-to-one conversation
+              if (!conversation?.isGroup) {
+                // check if the sender has already been blocked by the recipient
+                const otherParticipant = conversation?.participants.find(
+                  (p) =>
+                    (p.user as UserDocument)._id?.toString() !== data.senderId,
+                );
+                if (otherParticipant) {
+                  if (
+                    (otherParticipant.user as UserDocument).blockList
+                      ?.map((b) => b.toString())
+                      .includes(data.senderId)
+                  ) {
+                    res
+                      .status(400)
+                      .send("You have been blocked by the recipient");
+                    return;
+                  }
+                }
+
+                // check if the sender has already blocked the recipient
+
+                const otherParticipantStr = conversation?.participants
+                  .map((p) => (p.user as UserDocument)._id?.toString())
+                  .find((p) => p !== data.senderId);
+                if (otherParticipantStr) {
+                  if (
+                    sender.blockList
+                      ?.map((b) => b.toString())
+                      .includes(otherParticipantStr)
+                  ) {
+                    res
+                      .status(400)
+                      .send("You cannot send a message to a blocked user");
+                    return;
+                  }
+                }
+              }
+              if (
+                conversation?.isSession &&
+                (conversation.session as SessionDocument).status ===
+                  SessionStatusEnum.closed
+              ) {
+                res
+                  .status(400)
+                  .send(
+                    "Session is closed, you cannot send a message to a closed session",
+                  );
+                return;
+              } else {
+                Conversation.findOneAndUpdate(
+                  { _id: data.conversationId },
+                  {
+                    $push: {
+                      messages: {
+                        conversation: data.conversationId,
+                        sender: data.senderId,
+                        text: postData.text,
+                        attachment: postData.attachment,
+                      },
+                    },
+                  },
+                  {
+                    new: true,
+                  },
+                )
+                  .populate(["participants.user"])
+                  .then(async (result) => {
+                    if (result) {
+                      res
+                        .status(200)
+                        .send(result.messages[result.messages.length - 1]);
+                      if (sender.firebaseToken) {
+                        console.log("sending firebase notification");
+                        // FirebaseService.sendNotification({ fcmToken: sender.firebaseToken as string })
+                        const recipients = extractOtherParticipants({
+                          conversation: conversation as ConversationDocument,
+                          senderId: data.senderId,
+                        });
+                        recipients.forEach(async (recipient) => {
+                          if (
+                            (recipient.user as UserDocument).settings
+                              ?.notifications
+                          ) {
+                            await FirebaseService.sendFcmNotif(
+                              (recipient.user as UserDocument)
+                                .firebaseToken as string,
+                            );
+                          }
+                        });
+                      } else {
+                        console.log("No firebase token found");
+                      }
+                      return;
+                    } else {
+                      res.status(400).send(null);
+                      return;
+                    }
+                  })
+                  .catch((error) => {
+                    console.error(error);
+                    res.status(500).send("Internal server error");
+                    return;
+                  });
+              }
+            });
+        } else {
+          res.status(400).send("Sender not found");
           return;
-        });
+        }
+      });
     } catch (error) {
       console.log(error);
       res.status(500).send("Internal server error");
@@ -974,8 +1466,8 @@ async function run_server() {
       res.status(400).send("Missing required fields");
       return;
     }
-    Conversation.find({ "participants.user": data.userId })
-      .populate("participants.user")
+    Conversation.find({ "participants.user": data.userId, isSession: false })
+      .populate(["participants.user", "session"])
       .then((conversations) => {
         res.send(conversations);
         return;
@@ -983,7 +1475,7 @@ async function run_server() {
   });
 
   app.get("/conversations/get", (req: Request, res: Response) => {
-    Conversation.findOne({ _id: req.query.userId })
+    Conversation.findOne({ _id: req.query.userId, isSession: false })
       .populate(["contacts", "blockList"])
       .then((user) => {
         res.send(user);
@@ -1042,15 +1534,16 @@ async function run_server() {
         console.log(
           `inside "new message" socket event: `,
           message,
-          participants,
+          // participants,
         );
         participants.forEach((participant) => {
-          console.log({ participant, sender: message.sender });
+          // console.log({ participant, sender: message.sender });
           if (participant === message.sender) {
-            console.log("skipping sender");
+            // console.log("skipping sender");
             // return
           } else {
-            console.log(`sending message to ${participant}...`);
+            // console.log(`sending message to ${participant}...`);
+            console.log("sending socket event to: ", participant);
             socket.in(participant).emit("message received", message);
           }
         });

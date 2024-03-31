@@ -33,6 +33,10 @@ type RootConfig = {
     smtpHost: string;
     smtpPort: number;
   };
+  firebaseConfig: {
+    // credentialFilePath: any
+    serverKey: string;
+  };
 };
 
 /**
@@ -64,6 +68,10 @@ const Config: RootConfig = {
     password: process.env.ETHEREAL_PASSWORD as string,
     smtpHost: process.env.SMTP_HOST as string,
     smtpPort: Number(process.env.SMTP_PORT),
+  },
+  firebaseConfig: {
+    // credentialFilePath: process.env.GOOGLE_APPLICATION_CREDENTIALS
+    serverKey: process.env.FIREBASE_PROJECT_SERVER_KEY as string,
   },
 };
 

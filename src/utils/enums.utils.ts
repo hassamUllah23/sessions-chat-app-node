@@ -3,4 +3,9 @@ enum InviteStatusEnum {
   accepted = "accepted",
   rejected = "rejected",
 }
-export { InviteStatusEnum };
+
+enum SessionStatusEnum {
+  ongoing = "ongoing",
+  closed = "closed",
+}
+export { InviteStatusEnum, SessionStatusEnum };
