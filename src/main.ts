@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import dotenv from "dotenv";
-import https from "https"
-import fs from "fs"
+// import { createServer } from "https"
+// import { readFileSync } from "fs"
 import bodyParser from "body-parser";
 import { Config } from "./services/config.service";
 import {
@@ -1494,23 +1494,23 @@ async function run_server() {
       });
   });
 
-  const server = https.createServer({
-    key: fs.readFileSync('server.key'),
-    cert: fs.readFileSync('server.crt')
-  }, app).listen(Number(serverConfig.port), serverConfig.host, () => {
-    console.log(
-      `[server]: Server is running at https://${serverConfig.host}:${serverConfig.port}`,
-    );
-  });
-  // const server = app.listen(
-  //   Number(serverConfig.port),
-  //   serverConfig.host,
-  //   () => {
-  //     console.log(
-  //       `[server]: Server is running at http://${serverConfig.host}:${serverConfig.port}`,
-  //     );
-  //   },
-  // );
+  // const server = https.createServer({
+  //   key: fs.readFileSync('server.key'),
+  //   cert: fs.readFileSync('server.crt')
+  // }, app).listen(Number(serverConfig.port), serverConfig.host, () => {
+  //   console.log(
+  //     `[server]: Server is running at https://${serverConfig.host}:${serverConfig.port}`,
+  //   );
+  // });
+  const server = app.listen(
+    Number(serverConfig.port),
+    serverConfig.host,
+    () => {
+      console.log(
+        `[server]: Server is running at http://${serverConfig.host}:${serverConfig.port}`,
+      );
+    },
+  );
 
   const io = new Server(server, {
     // pingTimeout: 360000,
@@ -1518,6 +1518,18 @@ async function run_server() {
       origin: "*",
     },
   });
+  // const httpsServer = createServer({
+  //   key: readFileSync("server.key"),
+  //   cert: readFileSync("server.crt")
+  // }, app);
+
+  // const io = new Server(httpsServer, {
+  //   // cors: {
+  //   //   origin: "*",
+  //   //   allowedHeaders: "*",
+  //   //   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  //   // },
+  // });
 
   io.on("connection", (socket) => {
     console.warn(`${socket.id} : connected from frontend`);
@@ -1565,6 +1577,12 @@ async function run_server() {
       },
     );
   });
+
+  // httpsServer.listen(Number(serverConfig.port), serverConfig.host, () => {
+  //   console.log(
+  //     `[server]: Server is running at https://${serverConfig.host}:${serverConfig.port}`,
+  //   );
+  // });
 }
 
 run_server();
