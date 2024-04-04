@@ -5,9 +5,11 @@
   "license": "MIT",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "cross-env NODE_ENV=dev ts-node-dev src/main.ts",
+    "dev": "cross-env NODE_ENV=dev ts-node-dev src/main.ts --server",
     "build": "npx tsc",
     "prod": "cross-env NODE_ENV=prod node dist/main.js",
+    "dev:cs": "cross-env NODE_ENV=dev ts-node-dev src/main.ts --close-session --sessionId",
+    "prod:cs": "cross-env NODE_ENV=prod ts-node-dev src/main.ts --close-session --sessionId",
     "format": "prettier --write \"src/**/*.ts\"",
     "prepare": "husky install"
   },

@@ -53,4 +53,13 @@ function extractOtherParticipant({
   );
 }
 
-export { hasEmptyValues, extractOtherParticipants, extractOtherParticipant };
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export {
+  hasEmptyValues,
+  extractOtherParticipants,
+  extractOtherParticipant,
+  sleep,
+};

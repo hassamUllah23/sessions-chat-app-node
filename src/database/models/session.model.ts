@@ -16,9 +16,13 @@ const sessionSchema = new Schema<SessionDocument>(
       required: true,
       enum: Array.from(Object.values(SessionStatusEnum)),
     },
-    duration: { type: Number, required: true },
+    duration: { type: Number, required: true, immutable: true },
     conversation: { type: Schema.Types.ObjectId, ref: "Conversations" },
-    parentConversation: { type: Schema.Types.ObjectId, ref: "Conversations" },
+    parentConversation: {
+      type: Schema.Types.ObjectId,
+      ref: "Conversations",
+      immutable: true,
+    },
   },
   {
     collection: collectionName,

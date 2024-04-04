@@ -37,6 +37,9 @@ type RootConfig = {
     // credentialFilePath: any
     serverKey: string;
   };
+  sessionConfig: {
+    deletionInterval: number;
+  };
 };
 
 /**
@@ -72,6 +75,9 @@ const Config: RootConfig = {
   firebaseConfig: {
     // credentialFilePath: process.env.GOOGLE_APPLICATION_CREDENTIALS
     serverKey: process.env.FIREBASE_PROJECT_SERVER_KEY as string,
+  },
+  sessionConfig: {
+    deletionInterval: Number(process.env.SESSION_DELETION_TIME_INTERVAL),
   },
 };
 
