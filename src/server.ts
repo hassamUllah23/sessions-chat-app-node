@@ -33,7 +33,7 @@ import cors from "cors";
 dotenv.config();
 
 async function run_server() {
-  const { authConfig, databaseConfig, serverConfig } = Config;
+  const { databaseConfig, serverConfig, mailerConfig } = Config;
   console.log("Server starting...");
   await mongoose.connect(databaseConfig.uri, {
     dbName: databaseConfig.db, // Specify your desired database name
@@ -177,11 +177,19 @@ async function run_server() {
               return res.status(400).send("Missing required fields");
             }
             try {
-              MailService.sendEmailJsMail({
-                to_name: data.to_name!!,
-                new_password: data.new_password!!,
+              MailService.sendEmail({
+                subject: "Change Password",
+                to: user.email,
+                text: `Hello ${user.name}! "${generatedPassword}" This is an auto-generated password that you can use to login to your account.`,
+                html: `
+                Hello <b>${user.name}!</b>
+                <br>
+                <h2>${generatedPassword}</h2>
+                This is an auto-generated password that you can use to login to your account.
+                `,
               });
               res.status(200).send("Temporary Password sent to your email");
+              return;
             } catch (error) {
               res.status(500).send("Failed to send email");
             }

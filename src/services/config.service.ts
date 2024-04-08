@@ -25,13 +25,8 @@ type RootConfig = {
     password: string;
   };
   mailerConfig: {
-    // apiKey: string;
+    apiKey: string;
     from: string;
-    // to: string;
-    username: string;
-    password: string;
-    smtpHost: string;
-    smtpPort: number;
   };
   firebaseConfig: {
     // credentialFilePath: any
@@ -64,13 +59,8 @@ const Config: RootConfig = {
     password: process.env.DB_PASS as string,
   },
   mailerConfig: {
-    // apiKey: process.env.SENDGRID_API_KEY as string,
-    from: process.env.SMTP_FROM as string,
-    // to: process.env.SENDGRID_TO_ADDRESS as string,
-    username: process.env.ETHEREAL_USERNAME as string,
-    password: process.env.ETHEREAL_PASSWORD as string,
-    smtpHost: process.env.SMTP_HOST as string,
-    smtpPort: Number(process.env.SMTP_PORT),
+    apiKey: process.env.SENDGRID_API_KEY as string,
+    from: process.env.SENDGRID_FROM_ADDRESS as string,
   },
   firebaseConfig: {
     // credentialFilePath: process.env.GOOGLE_APPLICATION_CREDENTIALS
